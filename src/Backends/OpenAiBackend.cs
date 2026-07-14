@@ -34,16 +34,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
         {
             try
             {
-                try
-                {
-                    return SendOnce(prompt, prompt.UseStructuredOutput, CancellationToken.None);
-                }
-                catch (BackendException ex)
-                {
-                    if (ex.StatusCode != 400 || !prompt.UseStructuredOutput) throw;
-                    Logger.Warn("The OpenAI-compatible endpoint rejected JSON Schema; retrying with prompt-only JSON.");
-                    return SendOnce(prompt, false, CancellationToken.None);
-                }
+                return SendOnce(prompt, CancellationToken.None);
             }
             catch (OperationCanceledException ex)
             {
@@ -71,10 +62,9 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
 
         private string SendOnce(
            PromptEnvelope prompt,
-           bool useStructuredOutput,
            CancellationToken cancellationToken)
         {
-            using (HttpRequestMessage request = BuildRequest(prompt, useStructuredOutput))
+            using (HttpRequestMessage request = BuildRequest(prompt))
             using (HttpResponseMessage response = client.SendAsync(
                request,
                HttpCompletionOption.ResponseContentRead,
@@ -94,7 +84,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
             }
         }
 
-        private HttpRequestMessage BuildRequest(PromptEnvelope prompt, bool useStructuredOutput)
+        private HttpRequestMessage BuildRequest(PromptEnvelope prompt)
         {
             Dictionary<string, object> root = Object();
             root["model"] = Settings.Model;
@@ -112,19 +102,6 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
             user["content"] = prompt.UserMessage;
             messages.Add(user);
             root["messages"] = messages;
-
-            if (useStructuredOutput)
-            {
-                Dictionary<string, object> jsonSchema = Object();
-                jsonSchema["name"] = "translation_batch";
-                jsonSchema["strict"] = true;
-                jsonSchema["schema"] = JsonSchemaFactory.CreateTranslationSchema(prompt.ExpectedIds);
-
-                Dictionary<string, object> responseFormat = Object();
-                responseFormat["type"] = "json_schema";
-                responseFormat["json_schema"] = jsonSchema;
-                root["response_format"] = responseFormat;
-            }
 
             HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, chatCompletionsEndpoint);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));

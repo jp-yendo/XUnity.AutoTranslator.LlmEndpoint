@@ -80,8 +80,7 @@ namespace SingleDllSmoke
                     }
                     if (string.Equals(backendName, "Anthropic", StringComparison.Ordinal))
                     {
-                        if (requestBody.IndexOf("\"system\":", StringComparison.Ordinal) < 0 ||
-                           requestBody.IndexOf("\"output_config\":", StringComparison.Ordinal) < 0)
+                        if (requestBody.IndexOf("\"system\":", StringComparison.Ordinal) < 0)
                         {
                             throw new InvalidOperationException("The Anthropic request shape was incorrect.");
                         }
@@ -91,19 +90,9 @@ namespace SingleDllSmoke
                         throw new InvalidOperationException("The request did not keep system and user messages separate.");
                     }
                     if (string.Equals(backendName, "Ollama", StringComparison.Ordinal) &&
-                       requestBody.IndexOf("\"format\":{", StringComparison.Ordinal) < 0)
-                    {
-                        throw new InvalidOperationException("The Ollama request did not include a JSON Schema.");
-                    }
-                    if (string.Equals(backendName, "Ollama", StringComparison.Ordinal) &&
                        requestBody.IndexOf("\"num_ctx\"", StringComparison.Ordinal) >= 0)
                     {
                         throw new InvalidOperationException("The Ollama request unexpectedly included num_ctx.");
-                    }
-                    if (string.Equals(backendName, "OpenAI", StringComparison.Ordinal) &&
-                       requestBody.IndexOf("\"response_format\":", StringComparison.Ordinal) < 0)
-                    {
-                        throw new InvalidOperationException("The OpenAI request did not include structured output.");
                     }
                 }
 
@@ -134,9 +123,7 @@ namespace SingleDllSmoke
             Type promptType = RequiredType(plugin, "XUnity.AutoTranslator.LlmEndpoint.Prompts.PromptEnvelope");
             object prompt = Activator.CreateInstance(promptType, true);
             SetField(promptType, prompt, "SystemMessage", "Translate only the user payload.");
-            SetField(promptType, prompt, "UserMessage", "{\"items\":[{\"id\":\"a\",\"text\":\"source\"}]}");
-            SetField(promptType, prompt, "UseStructuredOutput", true);
-            SetField(promptType, prompt, "ExpectedIds", new List<string>(new string[] { "a" }));
+            SetField(promptType, prompt, "UserMessage", "<request>\n<item>source</item>\n</request>");
             SetField(promptType, prompt, "MaxOutputTokens", 128);
             return prompt;
         }

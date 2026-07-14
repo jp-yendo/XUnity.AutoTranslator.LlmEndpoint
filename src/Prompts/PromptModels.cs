@@ -14,6 +14,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Prompts
     {
         public string SourceLanguage;
         public string TargetLanguage;
+        public string AppSummary;
         public string AdditionalInstructions;
     }
 
@@ -21,8 +22,6 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Prompts
     {
         public string SystemMessage;
         public string UserMessage;
-        public bool UseStructuredOutput;
-        public List<string> ExpectedIds;
         public int MaxOutputTokens;
     }
 

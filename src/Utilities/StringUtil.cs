@@ -45,5 +45,30 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Utilities
             if (value > maximum) return maximum;
             return value;
         }
+
+        /// <summary>
+        /// Converts the literal escape sequences \n, \r, \t, and \\ into their
+        /// actual characters so single-line INI values can carry line breaks.
+        /// Unknown sequences keep both characters unchanged.
+        /// </summary>
+        public static string UnescapeSequences(string value)
+        {
+            if (value == null || value.IndexOf('\\') < 0) return value;
+            System.Text.StringBuilder builder = new System.Text.StringBuilder(value.Length);
+            for (int i = 0; i < value.Length; i++)
+            {
+                char current = value[i];
+                if (current == '\\' && i + 1 < value.Length)
+                {
+                    char next = value[i + 1];
+                    if (next == 'n') { builder.Append('\n'); i++; continue; }
+                    if (next == 'r') { builder.Append('\r'); i++; continue; }
+                    if (next == 't') { builder.Append('\t'); i++; continue; }
+                    if (next == '\\') { builder.Append('\\'); i++; continue; }
+                }
+                builder.Append(current);
+            }
+            return builder.ToString();
+        }
     }
 }

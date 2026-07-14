@@ -28,6 +28,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Configuration
         public LogLevel LogLevel;
         public bool LogBatchActivity;
         public string LogFile;
+        public string AppSummary;
         public string AdditionalInstructions;
 
         public static LlmSettings Load(IInitializationContext context)
@@ -57,7 +58,10 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Configuration
             settings.LogFile = ResolvePath(
                context.GetOrCreateSetting<string>(Section, "LogFile", string.Empty),
                context.TranslatorDirectory);
-            settings.AdditionalInstructions = context.GetOrCreateSetting<string>(Section, "AdditionalInstructions", string.Empty);
+            settings.AppSummary = StringUtil.UnescapeSequences(
+               context.GetOrCreateSetting<string>(Section, "AppSummary", string.Empty));
+            settings.AdditionalInstructions = StringUtil.UnescapeSequences(
+               context.GetOrCreateSetting<string>(Section, "AdditionalInstructions", string.Empty));
             settings.Validate();
             return settings;
         }

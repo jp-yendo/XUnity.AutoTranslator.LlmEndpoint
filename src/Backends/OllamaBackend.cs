@@ -34,16 +34,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
         {
             try
             {
-                try
-                {
-                    return SendOnce(prompt, prompt.UseStructuredOutput, CancellationToken.None);
-                }
-                catch (BackendException ex)
-                {
-                    if (ex.StatusCode != 400 || !prompt.UseStructuredOutput) throw;
-                    Logger.Warn("Ollama rejected the JSON Schema; retrying with JSON mode.");
-                    return SendOnce(prompt, false, CancellationToken.None);
-                }
+                return SendOnce(prompt, CancellationToken.None);
             }
             catch (OperationCanceledException ex)
             {
@@ -71,10 +62,9 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
 
         private string SendOnce(
            PromptEnvelope prompt,
-           bool useJsonSchema,
            CancellationToken cancellationToken)
         {
-            using (HttpRequestMessage request = BuildRequest(prompt, useJsonSchema))
+            using (HttpRequestMessage request = BuildRequest(prompt))
             using (HttpResponseMessage response = client.SendAsync(
                request,
                HttpCompletionOption.ResponseContentRead,
@@ -94,7 +84,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
             }
         }
 
-        private HttpRequestMessage BuildRequest(PromptEnvelope prompt, bool useJsonSchema)
+        private HttpRequestMessage BuildRequest(PromptEnvelope prompt)
         {
             Dictionary<string, object> root = Object();
             root["model"] = Settings.Model;
@@ -113,13 +103,6 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
             user["content"] = prompt.UserMessage;
             messages.Add(user);
             root["messages"] = messages;
-
-            if (prompt.UseStructuredOutput)
-            {
-                root["format"] = useJsonSchema
-                   ? (object)JsonSchemaFactory.CreateTranslationSchema(prompt.ExpectedIds)
-                   : "json";
-            }
 
             HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, chatEndpoint);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));

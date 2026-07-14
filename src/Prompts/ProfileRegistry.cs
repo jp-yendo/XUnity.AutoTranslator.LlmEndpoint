@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using XUnity.AutoTranslator.LlmEndpoint.Prompts.Profiles;
 
 namespace XUnity.AutoTranslator.LlmEndpoint.Prompts
 {

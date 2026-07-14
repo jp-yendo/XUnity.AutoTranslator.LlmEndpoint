@@ -7,7 +7,6 @@ using XUnity.AutoTranslator.LlmEndpoint.Dispatch;
 using XUnity.AutoTranslator.LlmEndpoint.Logging;
 using XUnity.AutoTranslator.LlmEndpoint.Prompts;
 using XUnity.AutoTranslator.LlmEndpoint.Serialization;
-using XUnity.AutoTranslator.LlmEndpoint.Text;
 using XUnity.AutoTranslator.LlmEndpoint.Utilities;
 
 namespace XUnity.AutoTranslator.LlmEndpoint.Tests
@@ -21,10 +20,9 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Tests
             try
             {
                 TestMiniJson();
-                TestTextProtection();
+                TestEscapeSequences();
                 TestDefaultProfile();
                 TestHyMt2Profile();
-                TestSchema();
                 TestConfigurationDefaults();
                 TestPromptBudget();
                 TestRequestBudgetPolicy();
@@ -52,24 +50,13 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Tests
             Equal((string)input["text"], MiniJson.GetString(output, "text"), "JSON string round trip");
         }
 
-        private static void TestTextProtection()
+        private static void TestEscapeSequences()
         {
-            string source = "Hello <b>{0}</b>\r\n%s\\n";
-            ProtectedText protectedText = TextProtector.Protect(source);
-            string candidate = protectedText.Value.Replace("Hello", "Bonjour");
-            string restored;
-            string error;
-            True(protectedText.TryRestore(candidate, out restored, out error), "Protected tokens restore");
-            Equal("Bonjour <b>{0}</b>\r\n%s\\n", restored, "Protected token values");
-
-            ProtectedText literalMarker = TextProtector.Protect("literal __XUA_value {0}");
-            True(literalMarker.TryRestore(literalMarker.Value, out restored, out error), "Literal marker prefix accepted");
-            Equal("literal __XUA_value {0}", restored, "Literal marker prefix restored");
-
-            int start = protectedText.Value.IndexOf("__XUA_", StringComparison.Ordinal);
-            int end = protectedText.Value.IndexOf("__", start + 6, StringComparison.Ordinal);
-            string missing = protectedText.Value.Remove(start, end + 2 - start);
-            True(!protectedText.TryRestore(missing, out restored, out error), "Missing token rejection");
+            Equal("a\nb", StringUtil.UnescapeSequences("a\\nb"), "Newline escape expanded");
+            Equal("a\tb\r", StringUtil.UnescapeSequences("a\\tb\\r"), "Tab and carriage return escapes expanded");
+            Equal("path\\to", StringUtil.UnescapeSequences("path\\\\to"), "Escaped backslash preserved once");
+            Equal("no escapes", StringUtil.UnescapeSequences("no escapes"), "Plain text unchanged");
+            Equal("keep \\q", StringUtil.UnescapeSequences("keep \\q"), "Unknown escape left intact");
         }
 
         private static void TestDefaultProfile()
@@ -77,25 +64,71 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Tests
             DefaultTranslationProfile profile = new DefaultTranslationProfile();
             List<PromptItem> items = new List<PromptItem>();
             items.Add(Item("a", "first"));
-            items.Add(Item("b", "second"));
+            items.Add(Item("b", "line1\nline2"));
+            items.Add(Item("c", "second"));
             PromptContext context = Context();
+            context.AppSummary = "A near-future cyberpunk detective adventure.";
             context.AdditionalInstructions = "Keep UI labels concise.";
             PromptEnvelope prompt = profile.BuildPrompt(items, context, 0);
-            True(prompt.SystemMessage.IndexOf("untrusted data", StringComparison.Ordinal) >= 0, "Untrusted data boundary");
+            True(prompt.SystemMessage.IndexOf("Respond ONLY with XML", StringComparison.Ordinal) >= 0, "XML-only response instruction");
+            True(prompt.SystemMessage.IndexOf("ATK, HP, MP, ID", StringComparison.Ordinal) >= 0, "Established target-region terms preserved");
+            True(prompt.SystemMessage.IndexOf("A near-future cyberpunk detective adventure.", StringComparison.Ordinal) >= 0, "App summary background");
             True(prompt.SystemMessage.IndexOf("Keep UI labels concise.", StringComparison.Ordinal) >= 0, "Trusted additional instruction");
             True(prompt.SystemMessage.IndexOf("first", StringComparison.Ordinal) < 0, "Source absent from system prompt");
+            True(prompt.UserMessage.IndexOf("<request>", StringComparison.Ordinal) >= 0, "Request wrapper present in user payload");
             True(prompt.UserMessage.IndexOf("first", StringComparison.Ordinal) >= 0, "Source present in user payload");
 
-            string reordered = "{\"items\":[{\"id\":\"b\",\"translation\":\"two\"},{\"id\":\"a\",\"translation\":\"one\"}]}";
-            ProfileParseResult parsed = profile.ParseResponse(reordered, items, 0);
-            True(parsed.IsFormatValid, "Reordered response accepted by ID");
-            Equal("one", parsed.Translations["a"], "First translation mapped by ID");
-            Equal("two", parsed.Translations["b"], "Second translation mapped by ID");
+            // Complete response, reordered: every item is matched by its original text.
+            string complete = "<response>\n" +
+               "<item><original>second</original><translated>dos</translated></item>\n" +
+               "<item><original>first</original><translated>uno</translated></item>\n" +
+               "<item><original>line1\nline2</original><translated>eins zwei</translated></item>\n" +
+               "</response>";
+            ProfileParseResult parsed = profile.ParseResponse(complete, items, 0);
+            True(parsed.IsFormatValid, "Reordered complete response accepted by original text");
+            Equal("uno", parsed.Translations["a"], "Item mapped by original text, not position");
+            Equal("eins zwei", parsed.Translations["b"], "Multi-line original matched after whitespace reflow");
+            Equal("dos", parsed.Translations["c"], "Item mapped by original text, not position");
 
-            string partial = "{\"items\":[{\"id\":\"a\",\"translation\":\"one\"}]}";
-            parsed = profile.ParseResponse(partial, items, 0);
-            True(!parsed.IsFormatValid, "Partial response detected");
-            Equal(1, parsed.Translations.Count, "Valid partial item retained");
+            // A dropped item must NOT shift the others: 'a' is absent, yet 'b' and
+            // 'c' still resolve to the correct translations because we match on text.
+            string dropped = "<response>\n" +
+               "<item><original>line1 line2</original><translated>eins zwei</translated></item>\n" +
+               "<item><original>second</original><translated>dos</translated></item>\n" +
+               "</response>";
+            parsed = profile.ParseResponse(dropped, items, 0);
+            True(!parsed.IsFormatValid, "Missing item detected");
+            True(!parsed.Translations.ContainsKey("a"), "Dropped item left unresolved");
+            Equal("eins zwei", parsed.Translations["b"], "Survivor matched despite a dropped earlier item");
+            Equal("dos", parsed.Translations["c"], "No positional shift when an item is dropped");
+
+            // Two-pass fallback: when the model drops/alters a markup tag in its
+            // echoed <original>, Pass 1 (control/whitespace only) misses, but Pass 2
+            // (tags stripped) still matches on the plain text.
+            List<PromptItem> tagged = new List<PromptItem>();
+            tagged.Add(Item("p", "<b>Hello</b> world"));
+            tagged.Add(Item("q", "plain"));
+            string tagMangled = "<response>\n" +
+               "<item><original>Hello world</original><translated>Bonjour le monde</translated></item>\n" +
+               "<item><original>plain</original><translated>simple</translated></item>\n" +
+               "</response>";
+            parsed = profile.ParseResponse(tagMangled, tagged, 0);
+            True(parsed.IsFormatValid, "Tag-stripped fallback matched every item");
+            Equal("Bonjour le monde", parsed.Translations["p"], "Item matched after the model dropped its tags");
+            Equal("simple", parsed.Translations["q"], "Plain item matched in the first pass");
+
+            // An earlier confirmed match is never overturned by the looser pass.
+            List<PromptItem> similar = new List<PromptItem>();
+            similar.Add(Item("m", "<i>text</i>"));
+            similar.Add(Item("n", "text"));
+            string bothForms = "<response>\n" +
+               "<item><original>text</original><translated>plain-hit</translated></item>\n" +
+               "<item><original><i>text</i></original><translated>tag-hit</translated></item>\n" +
+               "</response>";
+            parsed = profile.ParseResponse(bothForms, similar, 0);
+            True(parsed.IsFormatValid, "Both variants resolved across the two passes");
+            Equal("tag-hit", parsed.Translations["m"], "Exact tag form kept its Pass 1 match");
+            Equal("plain-hit", parsed.Translations["n"], "Plain form kept its Pass 1 match");
         }
 
         private static void TestHyMt2Profile()
@@ -120,21 +153,6 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Tests
             True(!parsed.IsFormatValid, "hy-mt2 control token rejected");
             parsed = profile.ParseResponse("<hytext>translated</hytext>", items, 0);
             True(!parsed.IsFormatValid, "hy-mt2 wrapper echo rejected");
-        }
-
-        private static void TestSchema()
-        {
-            Dictionary<string, object> schema = JsonSchemaFactory.CreateTranslationSchema(new List<string>(new string[] { "a", "b" }));
-            Dictionary<string, object> properties = MiniJson.GetObject(schema, "properties");
-            Dictionary<string, object> items = MiniJson.GetObject(properties, "items");
-            Equal(2, Convert.ToInt32(items["minItems"]), "Schema minimum item count");
-            Equal(2, Convert.ToInt32(items["maxItems"]), "Schema maximum item count");
-
-            schema = JsonSchemaFactory.CreateTranslationSchema(new List<string>(new string[] { "a", "b" }), false);
-            properties = MiniJson.GetObject(schema, "properties");
-            items = MiniJson.GetObject(properties, "items");
-            True(!items.ContainsKey("minItems"), "Portable schema omits minimum item count");
-            True(!items.ContainsKey("maxItems"), "Portable schema omits maximum item count");
         }
 
         private static void TestResultOrdering()

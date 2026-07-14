@@ -20,7 +20,8 @@
 | `LogLevel` | `Info` | いいえ | `Debug`, `Info`, `Warn`, `Error`, `Off` | `Info` | `Info` | コンソールとファイルに共通の最小ログレベル。 |
 | `LogBatchActivity` | `false` | いいえ | `true`, `false` | `false` | `false` | バッチ依頼・応答のInfoログを有効にする。 |
 | `LogFile` | 空 | いいえ | ファイルパス | 空 | 空 | 空ならファイルを作成しない。相対パスは `Translators` 基準。 |
-| `AdditionalInstructions` | 空 | いいえ | 文字列 | 空 | 空 | systemメッセージへ加える信頼済み翻訳指示。翻訳対象本文とは分離される。 |
+| `AppSummary` | 空 | いいえ | 文字列 | 空 | 空 | 翻訳対象アプリ・ゲームの時代背景や設定・ジャンルなどの任意の補足。systemメッセージへ加えて翻訳のニュアンスを適正化する。文字数の強制上限はないが、コンテキスト節約とモデルの誤動作回避のため200文字以下を推奨。 |
+| `AdditionalInstructions` | 空 | いいえ | 文字列 | 空 | 空 | systemメッセージへ加える信頼済み翻訳指示。翻訳対象本文とは分離される。文字数の強制上限はないが、同じ理由で200文字以下を推奨。 |
 
 バックエンド別の `EndpointUrl` 初期値は次のとおりです。
 
@@ -38,7 +39,7 @@
 | `OpenAI` | `OPENAI_API_KEY` |
 | `Anthropic` | `ANTHROPIC_API_KEY` |
 
-## 8 GB GPU向け完全例
+## 8 GB GPU向けの全項目設定例
 
 ```ini
 [LlmEndpoint]
@@ -54,7 +55,46 @@ RetryCount=1
 LogLevel=Info
 LogBatchActivity=false
 LogFile=
+AppSummary=
 AdditionalInstructions=
+```
+
+## 16 GB GPU向けの全項目設定例
+
+```ini
+[LlmEndpoint]
+Backend=Ollama
+EndpointUrl=http://localhost:11434
+ApiKey=
+Model=replace-with-an-installed-ollama-model
+BatchIntervalMs=300
+MaxBatchSize=16
+MaxRequestTokens=16384
+MaxParallelRequests=1
+RetryCount=1
+LogLevel=Info
+LogBatchActivity=false
+LogFile=
+AppSummary=
+AdditionalInstructions=
+```
+
+## AppSummary指定例
+
+`AppSummary` は「何を翻訳しているか」の背景をモデルに与え、適切な語調や用語選択を促します。任意設定で文字数の強制上限はありませんが、コンテキストを圧迫するため200文字以下を推奨します。
+
+```ini
+; 時代物
+AppSummary=大正時代の日本を舞台にしたビジュアルノベル。やや硬めで時代に合った語彙を使う。
+
+; SFアクション
+AppSummary=近未来を舞台にしたテンポの速いSFシューター。UIや戦闘用語は簡潔で現代的にする。
+```
+
+改行を含めたい場合は、値の中に `\n` と書くと、プロンプト上では改行に置き換わります。`\r`、`\t`、`\\`（バックスラッシュ自体）も同様に使えます。この置換は `AppSummary` と `AdditionalInstructions` の両方に適用されます。
+
+```ini
+AdditionalInstructions=固有名詞は原語のまま残す。\n数値の単位は変更しない。
 ```
 
 ## 調整例

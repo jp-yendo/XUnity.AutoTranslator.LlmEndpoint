@@ -1,8 +1,6 @@
 using System.Collections.Generic;
 using System.Text;
-using XUnity.AutoTranslator.LlmEndpoint.Backends;
 using XUnity.AutoTranslator.LlmEndpoint.Prompts;
-using XUnity.AutoTranslator.LlmEndpoint.Serialization;
 
 namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
 {
@@ -15,12 +13,6 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
         public static int EstimateUpperBoundTokens(PromptEnvelope prompt, IList<PromptItem> items)
         {
             long inputTokens = ByteCount(prompt.SystemMessage) + (long)ByteCount(prompt.UserMessage);
-            if (prompt.UseStructuredOutput)
-            {
-                inputTokens += ByteCount(MiniJson.Serialize(
-                   JsonSchemaFactory.CreateTranslationSchema(prompt.ExpectedIds)));
-            }
-
             long outputTokens = EstimateOutputUpperBoundTokens(items);
             return Saturate(inputTokens + outputTokens + ProviderEnvelopeReserveTokens);
         }

@@ -6,7 +6,6 @@ using XUnity.AutoTranslator.LlmEndpoint.Backends;
 using XUnity.AutoTranslator.LlmEndpoint.Configuration;
 using XUnity.AutoTranslator.LlmEndpoint.Logging;
 using XUnity.AutoTranslator.LlmEndpoint.Prompts;
-using XUnity.AutoTranslator.LlmEndpoint.Text;
 using XUnity.AutoTranslator.LlmEndpoint.Utilities;
 using XUnity.AutoTranslator.Plugin.Core.Endpoints;
 
@@ -64,7 +63,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
                     item.Operation = operation;
                     item.Index = i;
                     item.Id = "t_" + Guid.NewGuid().ToString("N");
-                    item.ProtectedText = TextProtector.Protect(originals[i]);
+                    item.Source = originals[i];
                     item.SourceLanguage = sourceLanguage;
                     item.TargetLanguage = targetLanguage;
                     item.EnqueuedUtc = now;
@@ -177,7 +176,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
         private static int GetTextCharacterCount(List<PendingItem> items)
         {
             int count = 0;
-            for (int i = 0; i < items.Count; i++) count += items[i].ProtectedText.Original.Length;
+            for (int i = 0; i < items.Count; i++) count += items[i].Source.Length;
             return count;
         }
 
@@ -249,18 +248,8 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
                         string translated;
                         if (parsed.Translations.TryGetValue(item.Id, out translated) && !StringUtil.IsBlank(translated))
                         {
-                            string restored;
-                            string restoreError;
-                            if (item.ProtectedText.TryRestore(translated, out restored, out restoreError))
-                            {
-                                item.Operation.CompleteItem(item.Index, restored);
-                                logger.Debug("Translation item completed (" + item.Id + ").");
-                            }
-                            else
-                            {
-                                logger.Warn("Rejected a translation because protected tokens were not preserved.");
-                                next.Add(item);
-                            }
+                            item.Operation.CompleteItem(item.Index, translated);
+                            logger.Debug("Translation item completed (" + item.Id + ").");
                         }
                         else
                         {
@@ -301,6 +290,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
             PromptContext context = new PromptContext();
             context.SourceLanguage = first.SourceLanguage;
             context.TargetLanguage = first.TargetLanguage;
+            context.AppSummary = settings.AppSummary;
             context.AdditionalInstructions = settings.AdditionalInstructions;
             return context;
         }
@@ -312,7 +302,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
             {
                 PromptItem promptItem = new PromptItem();
                 promptItem.Id = items[i].Id;
-                promptItem.Text = items[i].ProtectedText.Value;
+                promptItem.Text = items[i].Source;
                 promptItem.ContextBefore = items[i].ContextBefore;
                 promptItem.ContextAfter = items[i].ContextAfter;
                 result.Add(promptItem);

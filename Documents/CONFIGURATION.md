@@ -20,7 +20,8 @@ The configuration section is `[LlmEndpoint]`. Write key names with the capitaliz
 | `LogLevel` | `Info` | No | `Debug`, `Info`, `Warn`, `Error`, `Off` | `Info` | `Info` | Shared minimum level for console and file output. |
 | `LogBatchActivity` | `false` | No | `true`, `false` | `false` | `false` | Enables Info-level batch request and response logging. |
 | `LogFile` | Empty | No | File path | Empty | Empty | Empty disables file output. Relative paths use the `Translators` directory. |
-| `AdditionalInstructions` | Empty | No | String | Empty | Empty | Trusted translation guidance appended to the system message and kept separate from source text. |
+| `AppSummary` | Empty | No | String | Empty | Empty | Optional background about the app or game (setting, era, genre) added to the system message to improve translation nuance. No hard length limit; keep it within about 200 characters to save context and avoid model distraction. |
+| `AdditionalInstructions` | Empty | No | String | Empty | Empty | Trusted translation guidance appended to the system message and kept separate from source text. No hard length limit; keep it within about 200 characters for the same reason. |
 
 Backend-specific `EndpointUrl` defaults:
 
@@ -54,7 +55,46 @@ RetryCount=1
 LogLevel=Info
 LogBatchActivity=false
 LogFile=
+AppSummary=
 AdditionalInstructions=
+```
+
+## Complete example for a 16 GB GPU
+
+```ini
+[LlmEndpoint]
+Backend=Ollama
+EndpointUrl=http://localhost:11434
+ApiKey=
+Model=replace-with-an-installed-ollama-model
+BatchIntervalMs=300
+MaxBatchSize=16
+MaxRequestTokens=16384
+MaxParallelRequests=1
+RetryCount=1
+LogLevel=Info
+LogBatchActivity=false
+LogFile=
+AppSummary=
+AdditionalInstructions=
+```
+
+## AppSummary examples
+
+`AppSummary` gives the model background about what it is translating so it can pick appropriate tone and terminology. It is optional and has no hard length limit, but keep it within about 200 characters to conserve context and avoid distracting the model.
+
+```ini
+; A period drama
+AppSummary=A visual novel set in Taisho-era Japan; use slightly formal, period-appropriate wording.
+
+; A sci-fi action game
+AppSummary=A fast-paced near-future sci-fi shooter; keep UI and combat terms punchy and modern.
+```
+
+To include a line break, write `\n` in the value; it is replaced with a real newline in the prompt. `\r`, `\t`, and `\\` (a literal backslash) work the same way. This replacement applies to both `AppSummary` and `AdditionalInstructions`.
+
+```ini
+AdditionalInstructions=Keep proper nouns in the original language.\nDo not change numeric units.
 ```
 
 ## Tuning examples

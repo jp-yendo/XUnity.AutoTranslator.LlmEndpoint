@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using XUnity.AutoTranslator.LlmEndpoint.Text;
 
 namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
 {
@@ -89,7 +88,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
         public PendingOperation Operation;
         public int Index;
         public string Id;
-        public ProtectedText ProtectedText;
+        public string Source;
         public List<string> ContextBefore;
         public List<string> ContextAfter;
         public string SourceLanguage;
