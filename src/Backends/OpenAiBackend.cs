@@ -1,10 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Net;
-using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Text;
-using System.Threading;
 using XUnity.AutoTranslator.LlmEndpoint.Configuration;
 using XUnity.AutoTranslator.LlmEndpoint.Logging;
 using XUnity.AutoTranslator.LlmEndpoint.Prompts;
@@ -16,17 +12,12 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
 {
     internal sealed class OpenAiBackend : LlmBackendBase
     {
-        private readonly HttpClient client;
+        private readonly HttpTransport transport;
         private readonly Uri chatCompletionsEndpoint;
 
         public OpenAiBackend(LlmSettings settings, EndpointLogger logger) : base(settings, logger)
         {
-            HttpClientHandler handler = new HttpClientHandler();
-            handler.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
-            handler.MaxConnectionsPerServer = settings.MaxParallelRequests;
-            client = new HttpClient(handler);
-            client.Timeout = Timeout.InfiniteTimeSpan;
-            client.DefaultRequestHeaders.UserAgent.ParseAdd(ProductInfo.UserAgent);
+            transport = new HttpTransport(settings.MaxParallelRequests, ProductInfo.UserAgent);
             chatCompletionsEndpoint = ProviderEndpoint.OpenAiChatCompletions(settings.EndpointUrl);
         }
 
@@ -34,21 +25,20 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
         {
             try
             {
-                return SendOnce(prompt, CancellationToken.None);
+                HttpResult result = transport.PostJson(chatCompletionsEndpoint, BuildHeaders(), BuildBody(prompt));
+                if (result.Status < 200 || result.Status >= 300)
+                {
+                    throw new BackendException(
+                       BuildErrorMessage(result.Status, result.Body),
+                       IsTransientStatus(result.Status),
+                       result.RetryAfterMs,
+                       result.Status);
+                }
+                return ParseSuccess(result.Body);
             }
-            catch (OperationCanceledException ex)
+            catch (HttpTransportException ex)
             {
-                throw new BackendException("OpenAI request was canceled by the HTTP transport.", ex, true);
-            }
-            catch (HttpRequestException ex)
-            {
-                int status = ex.StatusCode.HasValue ? (int)ex.StatusCode.Value : 0;
-                throw new BackendException(
-                   status == 0
-                      ? "OpenAI transport failed before an HTTP response was received."
-                      : "OpenAI transport failed with HTTP status " + status + ".",
-                   ex,
-                   status == 0 || IsTransientStatus(status));
+                throw new BackendException("OpenAI transport failed: " + ex.Message, ex, ex.Transient);
             }
             catch (BackendException)
             {
@@ -60,31 +50,17 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
             }
         }
 
-        private string SendOnce(
-           PromptEnvelope prompt,
-           CancellationToken cancellationToken)
+        private IEnumerable<KeyValuePair<string, string>> BuildHeaders()
         {
-            using (HttpRequestMessage request = BuildRequest(prompt))
-            using (HttpResponseMessage response = client.SendAsync(
-               request,
-               HttpCompletionOption.ResponseContentRead,
-               cancellationToken).GetAwaiter().GetResult())
+            List<KeyValuePair<string, string>> headers = new List<KeyValuePair<string, string>>();
+            if (!StringUtil.IsBlank(Settings.ApiKey))
             {
-                string body = response.Content.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult();
-                int status = (int)response.StatusCode;
-                if (!response.IsSuccessStatusCode)
-                {
-                    throw new BackendException(
-                       BuildErrorMessage(status, body),
-                       IsTransientStatus(status),
-                       GetRetryAfterMilliseconds(response.Headers.RetryAfter),
-                       status);
-                }
-                return ParseSuccess(body);
+                headers.Add(new KeyValuePair<string, string>("Authorization", "Bearer " + Settings.ApiKey));
             }
+            return headers;
         }
 
-        private HttpRequestMessage BuildRequest(PromptEnvelope prompt)
+        private string BuildBody(PromptEnvelope prompt)
         {
             Dictionary<string, object> root = Object();
             root["model"] = Settings.Model;
@@ -103,14 +79,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
             messages.Add(user);
             root["messages"] = messages;
 
-            HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, chatCompletionsEndpoint);
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            if (!StringUtil.IsBlank(Settings.ApiKey))
-            {
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Settings.ApiKey);
-            }
-            request.Content = new StringContent(MiniJson.Serialize(root), Encoding.UTF8, "application/json");
-            return request;
+            return MiniJson.Serialize(root);
         }
 
         private static string ParseSuccess(string body)
@@ -202,22 +171,6 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
             return StringUtil.IsBlank(detail)
                ? "OpenAI request failed with HTTP status " + status + "."
                : "OpenAI request failed with HTTP status " + status + " (" + detail + ").";
-        }
-
-        private static int GetRetryAfterMilliseconds(RetryConditionHeaderValue retryAfter)
-        {
-            if (retryAfter == null) return 0;
-            if (retryAfter.Delta.HasValue)
-            {
-                double milliseconds = retryAfter.Delta.Value.TotalMilliseconds;
-                return milliseconds >= int.MaxValue ? int.MaxValue : Math.Max(0, (int)milliseconds);
-            }
-            if (retryAfter.Date.HasValue)
-            {
-                double milliseconds = (retryAfter.Date.Value - DateTimeOffset.UtcNow).TotalMilliseconds;
-                return milliseconds >= int.MaxValue ? int.MaxValue : Math.Max(0, (int)milliseconds);
-            }
-            return 0;
         }
 
         private static Dictionary<string, object> Object()

@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
+    <!-- Dual build from one source: net6.0 = IL2CPP (BepInEx6/MelonLoader IL2CPP),
+         net35 = Mono (BepInEx5/MelonLoader Mono), matching the XUnity.AutoTranslator
+         Developer distributions referenced under ref\. -->
+    <TargetFrameworks>net6.0;net35</TargetFrameworks>
     <LangVersion>11.0</LangVersion>
     <Nullable>disable</Nullable>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
@@ -8,8 +11,22 @@
     <AssemblyName>XUnity.AutoTranslator.LlmEndpoint</AssemblyName>
     <RootNamespace>XUnity.AutoTranslator.LlmEndpoint</RootNamespace>
     <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+  <!-- Each target framework references the matching XUnity.AutoTranslator core.
+       Override XUnityAutoTranslatorCorePath to build a single framework against
+       another compatible distribution. -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net6.0'">
     <XUnityAutoTranslatorCorePath Condition="'$(XUnityAutoTranslatorCorePath)' == ''">ref\XUnity.AutoTranslator-Developer-IL2CPP\XUnity.AutoTranslator.Plugin.Core.dll</XUnityAutoTranslatorCorePath>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net35'">
+    <XUnityAutoTranslatorCorePath Condition="'$(XUnityAutoTranslatorCorePath)' == ''">ref\XUnity.AutoTranslator-Developer\XUnity.AutoTranslator.Plugin.Core.dll</XUnityAutoTranslatorCorePath>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net35'">
+    <!-- Build-time only: net35 reference assemblies for the modern .NET SDK. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
 
   <ItemGroup>
     <Compile Include="Properties\AssemblyInfo.cs" />
@@ -28,6 +45,7 @@
     <None Include="LICENSE" />
     <None Include="README-ja.md" />
     <None Include="README.md" />
+    <None Include="scripts\pack.ps1" />
     <None Include="THIRD_PARTY_NOTICES.md" />
     <Reference Include="XUnity.AutoTranslator.Plugin.Core">
       <HintPath>$(XUnityAutoTranslatorCorePath)</HintPath>

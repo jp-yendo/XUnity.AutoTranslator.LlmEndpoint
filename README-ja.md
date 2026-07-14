@@ -12,16 +12,28 @@
 
 ## インストール
 
-1. `XUnity.AutoTranslator.LlmEndpoint.dll` をゲームの `Translators` フォルダへコピーします。
-2. XUnity.AutoTranslatorの `Config.ini` を開きます。
-3. `[Service]` セクションでエンドポイントを選択します。
+利用中のMODローダーとランタイムに合うリリースZIPをダウンロードし、ゲームディレクトリへそのまま展開します。書庫内のフォルダ構成がゲームフォルダへオーバーレイされ、DLLが正しい `Translators` フォルダへ配置されます。
+
+| リリースZIP | MODローダー / ランタイム |
+|---|---|
+| `...-BepInEx-<ver>.zip` | BepInEx 5（Mono） |
+| `...-BepInEx-IL2CPP-<ver>.zip` | BepInEx 6（IL2CPP） |
+| `...-MelonMod-<ver>.zip` | MelonLoader（Mono） |
+| `...-MelonMod-IL2CPP-<ver>.zip` | MelonLoader（IL2CPP） |
+
+手動で導入する場合は、`XUnity.AutoTranslator.LlmEndpoint.dll` をXUnity.AutoTranslatorの `Translators` フォルダへコピーします（IL2CPPゲームはIL2CPPビルド、MonoゲームはMonoビルドを使用）。
+
+続いてエンドポイントを設定します。
+
+1. XUnity.AutoTranslatorの `Config.ini` を開きます。
+2. `[Service]` セクションでエンドポイントを選択します。
 
 ```ini
 [Service]
 Endpoint=LlmEndpoint
 ```
 
-4. `[LlmEndpoint]` セクションを追加し、少なくともバックエンドとモデルを設定します。
+3. `[LlmEndpoint]` セクションを追加し、少なくともバックエンドとモデルを設定します。
 
 ## 最小設定
 

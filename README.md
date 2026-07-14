@@ -12,16 +12,28 @@ Supported backends:
 
 ## Installation
 
-1. Copy `XUnity.AutoTranslator.LlmEndpoint.dll` into the game's `Translators` directory.
-2. Open the XUnity.AutoTranslator `Config.ini` file.
-3. Select the endpoint in the `[Service]` section:
+Download the release ZIP that matches your mod loader and runtime, then extract it directly into the game directory. The archive's folder layout overlays onto the game folder, placing the DLL in the correct `Translators` directory automatically.
+
+| Release ZIP | Mod loader / runtime |
+|---|---|
+| `...-BepInEx-<ver>.zip` | BepInEx 5 (Mono) |
+| `...-BepInEx-IL2CPP-<ver>.zip` | BepInEx 6 (IL2CPP) |
+| `...-MelonMod-<ver>.zip` | MelonLoader (Mono) |
+| `...-MelonMod-IL2CPP-<ver>.zip` | MelonLoader (IL2CPP) |
+
+Alternatively, copy `XUnity.AutoTranslator.LlmEndpoint.dll` into the `Translators` directory of your XUnity.AutoTranslator installation manually (use the IL2CPP build for IL2CPP games and the Mono build for Mono games).
+
+Then configure the endpoint:
+
+1. Open the XUnity.AutoTranslator `Config.ini` file.
+2. Select the endpoint in the `[Service]` section:
 
 ```ini
 [Service]
 Endpoint=LlmEndpoint
 ```
 
-4. Add an `[LlmEndpoint]` section and configure at least the backend and model.
+3. Add an `[LlmEndpoint]` section and configure at least the backend and model.
 
 ## Minimal configuration
 
