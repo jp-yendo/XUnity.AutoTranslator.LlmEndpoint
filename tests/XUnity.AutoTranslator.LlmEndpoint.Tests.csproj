@@ -11,7 +11,7 @@
     <Compile Remove="SingleDllSmoke\**\*.cs" />
     <ProjectReference Include="..\XUnity.AutoTranslator.LlmEndpoint.csproj" />
     <Reference Include="XUnity.AutoTranslator.Plugin.Core">
-      <HintPath>..\ref\XUnity.AutoTranslator-MelonMod-IL2CPP-5.6.1\UserLibs\XUnity.AutoTranslator.Plugin.Core.dll</HintPath>
+      <HintPath>..\ref\XUnity.AutoTranslator-Developer-IL2CPP\XUnity.AutoTranslator.Plugin.Core.dll</HintPath>
       <Private>true</Private>
     </Reference>
   </ItemGroup>
