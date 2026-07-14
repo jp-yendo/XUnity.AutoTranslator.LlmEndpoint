@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>11.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <AssemblyName>XUnity.AutoTranslator.LlmEndpoint</AssemblyName>
+    <RootNamespace>XUnity.AutoTranslator.LlmEndpoint</RootNamespace>
+    <Deterministic>true</Deterministic>
+    <XUnityAutoTranslatorCorePath Condition="'$(XUnityAutoTranslatorCorePath)' == ''">ref\XUnity.AutoTranslator-MelonMod-IL2CPP-5.6.1\UserLibs\XUnity.AutoTranslator.Plugin.Core.dll</XUnityAutoTranslatorCorePath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="src\**\*.cs" />
+    <None Include=".gitignore" />
+    <None Include="AGENTS.md" />
+    <None Include="CHANGELOG.md" />
+    <None Include="Documents\BUILD-ja.md" />
+    <None Include="Documents\BUILD.md" />
+    <None Include="Documents\CONFIGURATION-ja.md" />
+    <None Include="Documents\CONFIGURATION.md" />
+    <None Include="Documents\システム仕様.md" />
+    <None Include="examples\Config.Anthropic.ini" />
+    <None Include="examples\Config.Ollama.ini" />
+    <None Include="examples\Config.OpenAI.ini" />
+    <None Include="README-ja.md" />
+    <None Include="README.md" />
+    <None Include="THIRD_PARTY_NOTICES.md" />
+    <Reference Include="XUnity.AutoTranslator.Plugin.Core">
+      <HintPath>$(XUnityAutoTranslatorCorePath)</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
