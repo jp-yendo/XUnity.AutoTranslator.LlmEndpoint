@@ -26,7 +26,9 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Tests
                 TestConfigurationDefaults();
                 TestPromptBudget();
                 TestRequestBudgetPolicy();
+                TestPassthroughFilter();
                 TestLogging();
+                TestLogRotation();
                 TestDurationFormatting();
                 TestResultOrdering();
                 TestProviderEndpoints();
@@ -165,50 +167,117 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Tests
             Equal("two", results[1], "Second result order");
         }
 
+        // The logger writes to a per-day file: "<base>-yyyyMMdd<ext>" derived from the
+        // configured LogFile, using the local date.
+        private static string DatedPath(string configuredPath, int sequence)
+        {
+            string dir = Path.GetDirectoryName(configuredPath);
+            string baseName = Path.GetFileNameWithoutExtension(configuredPath);
+            string ext = Path.GetExtension(configuredPath);
+            string date = DateTime.Now.ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture);
+            string name = sequence <= 0
+               ? baseName + "-" + date + ext
+               : baseName + "-" + date + "-" + sequence + ext;
+            return string.IsNullOrEmpty(dir) ? name : Path.Combine(dir, name);
+        }
+
         private static void TestLogging()
         {
             string path = Path.Combine(AppContext.BaseDirectory, "logger-test-" + Guid.NewGuid().ToString("N") + ".log");
             string filteredPath = Path.Combine(AppContext.BaseDirectory, "logger-test-" + Guid.NewGuid().ToString("N") + ".log");
+            string datedPath = DatedPath(path, 0);
+            string filteredDatedPath = DatedPath(filteredPath, 0);
             TextWriter originalOutput = Console.Out;
             StringWriter consoleOutput = new StringWriter();
             try
             {
                 Console.SetOut(consoleOutput);
-                EndpointLogger logger = new EndpointLogger(LogLevel.Debug, path, string.Empty);
+                EndpointLogger logger = new EndpointLogger(LogLevel.Debug, path, 7, string.Empty);
                 logger.BatchActivity(false, "hidden-batch-entry");
-                True(!File.Exists(path), "Disabled batch activity is hidden at Debug level");
-                True(consoleOutput.ToString().IndexOf("hidden-batch-entry", StringComparison.Ordinal) < 0,
-                   "Disabled batch activity is absent from console output");
+                True(!File.Exists(datedPath), "Disabled batch activity is hidden at Debug level");
                 logger.BatchActivity(true, "visible-batch-entry");
-                True(consoleOutput.ToString().IndexOf("visible-batch-entry", StringComparison.Ordinal) >= 0,
-                   "Enabled batch activity appears in console output");
-                True(File.ReadAllText(path).IndexOf("visible-batch-entry", StringComparison.Ordinal) >= 0,
-                   "Enabled batch activity appears in file output");
+                True(File.ReadAllText(datedPath).IndexOf("visible-batch-entry", StringComparison.Ordinal) >= 0,
+                   "Enabled batch activity appears in the dated file output");
+                True(!File.Exists(path), "The undated configured path itself is never written");
 
-                EndpointLogger filteredLogger = new EndpointLogger(LogLevel.Warn, filteredPath, string.Empty);
+                EndpointLogger filteredLogger = new EndpointLogger(LogLevel.Warn, filteredPath, 7, string.Empty);
                 filteredLogger.BatchActivity(true, "filtered-batch-entry");
-                True(!File.Exists(filteredPath), "Batch activity does not raise the configured log level");
-                True(consoleOutput.ToString().IndexOf("filtered-batch-entry", StringComparison.Ordinal) < 0,
-                   "Batch activity obeys the common log level");
+                True(!File.Exists(filteredDatedPath), "Batch activity does not raise the configured log level");
+
+                // With no LogFile configured, nothing is written anywhere (the host
+                // console is never used as a sink).
+                EndpointLogger fileless = new EndpointLogger(LogLevel.Debug, string.Empty, 7, string.Empty);
+                fileless.Info("no-sink-entry");
+                fileless.BatchActivity(true, "no-sink-batch-entry");
+
+                True(consoleOutput.ToString().Length == 0,
+                   "The logger never writes to the console");
             }
             finally
             {
                 Console.SetOut(originalOutput);
                 consoleOutput.Dispose();
+                if (File.Exists(datedPath)) File.Delete(datedPath);
+                if (File.Exists(filteredDatedPath)) File.Delete(filteredDatedPath);
                 if (File.Exists(path)) File.Delete(path);
                 if (File.Exists(filteredPath)) File.Delete(filteredPath);
+            }
+        }
+
+        private static void TestLogRotation()
+        {
+            string dir = Path.Combine(AppContext.BaseDirectory, "logrot-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            string configuredPath = Path.Combine(dir, "LLM.log");
+            string todayPath = DatedPath(configuredPath, 0);
+            string lockedFallbackPath = DatedPath(configuredPath, 1);
+
+            string staleDate = DateTime.Now.AddDays(-30).ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture);
+            string keptDate = DateTime.Now.AddDays(-3).ToString("yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture);
+            string stalePath = Path.Combine(dir, "LLM-" + staleDate + ".log");
+            string keptPath = Path.Combine(dir, "LLM-" + keptDate + ".log");
+            File.WriteAllText(stalePath, "old");
+            File.WriteAllText(keptPath, "recent");
+
+            try
+            {
+                // Retention of 7 days deletes the 30-day-old file, keeps the 3-day-old one.
+                EndpointLogger logger = new EndpointLogger(LogLevel.Info, configuredPath, 7, string.Empty);
+                logger.Info("rotation-entry");
+                True(File.Exists(todayPath), "Writes to today's dated file");
+                True(!File.Exists(stalePath), "Files older than the retention window are deleted");
+                True(File.Exists(keptPath), "Files inside the retention window are kept");
+                True(!File.Exists(configuredPath), "The undated template file is never created or deleted");
+
+                // When today's file is locked without sharing, a numeric fallback name is used.
+                using (new FileStream(todayPath, FileMode.Open, FileAccess.Read, FileShare.None))
+                {
+                    EndpointLogger locked = new EndpointLogger(LogLevel.Info, configuredPath, 0, string.Empty);
+                    locked.Info("locked-entry");
+                    True(File.Exists(lockedFallbackPath), "A locked dated file falls back to a suffixed name");
+                    True(File.ReadAllText(lockedFallbackPath).IndexOf("locked-entry", StringComparison.Ordinal) >= 0,
+                       "The fallback file receives the entry");
+                }
+            }
+            finally
+            {
+                try { Directory.Delete(dir, true); }
+                catch { }
             }
         }
 
         private static void TestConfigurationDefaults()
         {
             Equal(300, LlmSettings.DefaultBatchIntervalMs, "Default batch interval");
+            Equal(300000, LlmSettings.DefaultRequestTimeoutMs, "Default request timeout");
+            Equal(7, LlmSettings.DefaultLogRetentionDays, "Default log retention days");
             Equal(50, LlmSettings.EndpointMaxConcurrency, "Endpoint concurrency limit");
+            Equal(10, LlmSettings.DefaultMaxConcurrency, "Default max concurrency");
             Equal(500, LlmSettings.RetryBaseDelayMs, "Retry base delay");
             Equal(30000, LlmSettings.RetryMaximumDelayMs, "Retry maximum delay");
-            Equal(1, LlmSettings.MaxContextItems, "Context items per side");
             Equal(100, LlmSettings.DispatcherRecoveryDelayMs, "Dispatcher recovery delay");
             Equal("2023-06-01", LlmSettings.AnthropicApiVersion, "Anthropic API version");
+            Equal(8192, LlmSettings.AnthropicMaxOutputTokens, "Anthropic max output tokens");
         }
 
         private static void TestDurationFormatting()
@@ -244,6 +313,37 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Tests
             True(RequestBudgetPolicy.CanAddItem(0, 9000, 8192), "First item is always admitted");
             True(RequestBudgetPolicy.CanAddItem(1, 8192, 8192), "Additional item fits exact request budget");
             True(!RequestBudgetPolicy.CanAddItem(1, 8193, 8192), "Additional item exceeding request budget is deferred");
+        }
+
+        private static void TestPassthroughFilter()
+        {
+            // Numbers, symbols, single Latin letters (optionally with symbols) pass through.
+            string[] pass =
+            {
+                "360", "-5", "3.14", "1,000", "50%", "1:30", "1:30:45", "100/100", "+5", "(12, 34)",
+                "...", "!!!", "→", "★★★",
+                "A", "e", "Ａ", " E ", "(A)", "A+", "A-",
+                "v0", "v1.2.3", "ver 0.0.0", "version 1.0", "V2",
+                "4m3s", "4m 3s", "45s", "1h2m3s", "120s",
+                "FPS 340", "340fps",
+                "1920x1080", "1280×720",
+                "３６０", "　",
+            };
+            for (int i = 0; i < pass.Length; i++)
+            {
+                True(PassthroughFilter.ShouldPassthrough(pass[i]), "Passthrough: '" + pass[i] + "'");
+            }
+
+            // Natural language and multi-letter tokens (incl. a single CJK glyph) translate.
+            string[] translate =
+            {
+                "中", "OK", "Start Game", "Hello", "こんにちは",
+                "中2", "verbose 1.0", "a.m.", "HD", "A/B",
+            };
+            for (int i = 0; i < translate.Length; i++)
+            {
+                True(!PassthroughFilter.ShouldPassthrough(translate[i]), "Translate: '" + translate[i] + "'");
+            }
         }
 
         private static void TestProviderEndpoints()

@@ -6,8 +6,6 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Prompts
     {
         public string Id;
         public string Text;
-        public List<string> ContextBefore;
-        public List<string> ContextAfter;
     }
 
     internal sealed class PromptContext
@@ -22,7 +20,6 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Prompts
     {
         public string SystemMessage;
         public string UserMessage;
-        public int MaxOutputTokens;
     }
 
     internal sealed class ProfileParseResult

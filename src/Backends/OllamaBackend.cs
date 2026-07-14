@@ -16,7 +16,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
 
         public OllamaBackend(LlmSettings settings, EndpointLogger logger) : base(settings, logger)
         {
-            transport = new HttpTransport(settings.MaxParallelRequests, ProductInfo.UserAgent);
+            transport = new HttpTransport(settings.MaxParallelRequests, settings.RequestTimeoutMs, ProductInfo.UserAgent);
             chatEndpoint = ProviderEndpoint.OllamaChat(settings.EndpointUrl);
         }
 

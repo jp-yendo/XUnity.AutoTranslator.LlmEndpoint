@@ -47,6 +47,31 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Utilities
         }
 
         /// <summary>
+        /// Converts fullwidth ASCII variants (U+FF01-FF5E, i.e. fullwidth digits,
+        /// letters, and symbols) and the ideographic space (U+3000) to their halfwidth
+        /// equivalents. Intended for normalizing text before pattern checks; every other
+        /// character is left unchanged and a copy is allocated only when needed.
+        /// </summary>
+        public static string ToHalfwidth(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return value ?? string.Empty;
+            char[] buffer = null;
+            for (int i = 0; i < value.Length; i++)
+            {
+                char c = value[i];
+                char converted = c;
+                if (c >= '！' && c <= '～') converted = (char)(c - 0xFEE0);
+                else if (c == '　') converted = ' ';
+                if (converted != c)
+                {
+                    if (buffer == null) buffer = value.ToCharArray();
+                    buffer[i] = converted;
+                }
+            }
+            return buffer == null ? value : new string(buffer);
+        }
+
+        /// <summary>
         /// Converts the literal escape sequences \n, \r, \t, and \\ into their
         /// actual characters so single-line INI values can carry line breaks.
         /// Unknown sequences keep both characters unchanged.

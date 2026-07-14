@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 
 namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
 {
@@ -89,8 +88,6 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
         public int Index;
         public string Id;
         public string Source;
-        public List<string> ContextBefore;
-        public List<string> ContextAfter;
         public string SourceLanguage;
         public string TargetLanguage;
         public DateTime EnqueuedUtc;

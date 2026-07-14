@@ -41,21 +41,26 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
         private readonly string userAgent;
 #if NETFRAMEWORK
         private readonly int maxConnections;
+        private readonly int timeoutMs;
 #else
         private readonly HttpClient client;
 #endif
 
-        public HttpTransport(int maxConnections, string userAgent)
+        // timeoutMs bounds a single request end to end (connect, generation wait, and
+        // body read). A value of 0 or less disables the timeout entirely, in which case
+        // a silent network drop (no FIN/RST) can block the request indefinitely.
+        public HttpTransport(int maxConnections, int timeoutMs, string userAgent)
         {
             this.userAgent = userAgent;
 #if NETFRAMEWORK
             this.maxConnections = maxConnections < 1 ? 1 : maxConnections;
+            this.timeoutMs = timeoutMs > 0 ? timeoutMs : System.Threading.Timeout.Infinite;
 #else
             HttpClientHandler handler = new HttpClientHandler();
             handler.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
             handler.MaxConnectionsPerServer = maxConnections;
             client = new HttpClient(handler);
-            client.Timeout = Timeout.InfiniteTimeSpan;
+            client.Timeout = timeoutMs > 0 ? TimeSpan.FromMilliseconds(timeoutMs) : Timeout.InfiniteTimeSpan;
             client.DefaultRequestHeaders.UserAgent.ParseAdd(userAgent);
 #endif
         }
@@ -87,8 +92,8 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
             request.ContentType = JsonMediaType;
             request.UserAgent = userAgent;
             request.KeepAlive = true;
-            request.Timeout = System.Threading.Timeout.Infinite;
-            request.ReadWriteTimeout = System.Threading.Timeout.Infinite;
+            request.Timeout = timeoutMs;
+            request.ReadWriteTimeout = timeoutMs;
             request.ServicePoint.ConnectionLimit = maxConnections;
             try { request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate; }
             catch (NotImplementedException) { }
@@ -113,24 +118,53 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
                 throw new HttpTransportException("The request body could not be sent: " + ex.Message, ex, true);
             }
 
+            HttpWebResponse response;
             try
             {
-                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
-                {
-                    return ReadResponse(response);
-                }
+                response = (HttpWebResponse)request.GetResponse();
             }
             catch (WebException ex)
             {
-                HttpWebResponse response = ex.Response as HttpWebResponse;
-                if (response == null)
+                // An HTTP error status (4xx/5xx) surfaces here with the error response
+                // attached; read its body so the backend can inspect the status code.
+                // A null response means the exchange never produced a response at all
+                // (timeout, connect/receive failure, silently dropped connection).
+                HttpWebResponse errorResponse = ex.Response as HttpWebResponse;
+                if (errorResponse == null)
                 {
                     throw new HttpTransportException("No HTTP response was received: " + ex.Message, ex, true);
                 }
-                using (response)
+                using (errorResponse)
+                {
+                    return ReadErrorResponse(errorResponse);
+                }
+            }
+
+            using (response)
+            {
+                try
                 {
                     return ReadResponse(response);
                 }
+                catch (Exception ex)
+                {
+                    // The response began but the body could not be fully read (for
+                    // example the connection dropped mid-transfer). Treat it as a
+                    // transient transport failure so the retry policy can apply.
+                    throw new HttpTransportException("The response body could not be read: " + ex.Message, ex, true);
+                }
+            }
+        }
+
+        private static HttpResult ReadErrorResponse(HttpWebResponse response)
+        {
+            try
+            {
+                return ReadResponse(response);
+            }
+            catch (Exception ex)
+            {
+                throw new HttpTransportException("An HTTP error response could not be read: " + ex.Message, ex, true);
             }
         }
 

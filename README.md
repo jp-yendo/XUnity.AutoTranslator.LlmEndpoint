@@ -63,15 +63,15 @@ See the [configuration reference](Documents/CONFIGURATION.md) for every setting 
 
 ## Logging
 
-Logs are written to the host console at `Info` level by default. No log file is created unless `LogFile` is configured.
+Logging is emitted only when `LogFile` is configured; nothing is written to the host console. Set `LogFile` to capture logs at the configured `LogLevel` (`Info` by default). The file is split per day (for example `LLM.log` becomes `LLM-yyyyMMdd.log`), and files older than `LogRetentionDays` (7 by default) are deleted automatically.
 
-`LogBatchActivity=true` enables Info-level batch request and response entries containing counts, estimated size, and elapsed time. Individual translation details are available at `Debug` level. API keys and complete prompts or responses are not logged.
+`LogBatchActivity` (default `true`) writes Info-level batch request and response entries containing counts, estimated size, and elapsed time (only when `LogFile` is set). `LogTranslationItems` (default `false`) additionally writes an Info-level entry for each request source text and each resulting translation; it is verbose, so keep it off unless diagnosing. API keys and complete prompts or responses are not logged.
 
 ## Troubleshooting
 
 - `Model` is required. Initialization fails when it is empty.
 - `EndpointUrl` must be an absolute HTTP or HTTPS base URL.
-- Check the host console for initialization or connection errors.
+- To diagnose initialization or connection problems, set `LogFile` and inspect the resulting file.
 
 ## Additional documentation
 

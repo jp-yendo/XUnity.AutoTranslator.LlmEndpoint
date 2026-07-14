@@ -13,10 +13,12 @@ namespace XUnity.AutoTranslator.LlmEndpoint
     {
         private EndpointLogger logger;
         private TranslationDispatcher dispatcher;
+        // Resolved from configuration in Initialize; falls back to the default until then.
+        private int maxConcurrency = LlmSettings.DefaultMaxConcurrency;
 
         public string Id { get { return "LlmEndpoint"; } }
         public string FriendlyName { get { return "LLM Translation Endpoint"; } }
-        public int MaxConcurrency { get { return LlmSettings.EndpointMaxConcurrency; } }
+        public int MaxConcurrency { get { return maxConcurrency; } }
         public int MaxTranslationsPerRequest { get { return 1; } }
 
         public void Initialize(IInitializationContext context)
@@ -24,15 +26,25 @@ namespace XUnity.AutoTranslator.LlmEndpoint
             try
             {
                 LlmSettings settings = LlmSettings.Load(context);
+                maxConcurrency = settings.MaxConcurrency;
                 logger = new EndpointLogger(
                    settings.LogLevel,
                    settings.LogFile,
+                   settings.LogRetentionDays,
                    settings.ApiKey);
                 ProfileRegistry registry = new ProfileRegistry();
                 TranslationProfile profile = registry.Resolve(settings.Model);
                 ILlmBackend backend = BackendFactory.Create(settings, logger);
                 dispatcher = new TranslationDispatcher(settings, logger, profile, backend);
-                logger.Info("Initialized backend " + settings.Backend + " with model profile " + profile.Id + ".");
+                logger.Info(
+                   "Initialized backend " + settings.Backend +
+                   " (model=" + settings.Model +
+                   ", profile=" + profile.Id +
+                   ", max_request_tokens=" + settings.MaxRequestTokens +
+                   ", max_batch_size=" + settings.MaxBatchSize +
+                   ", max_parallel_requests=" + settings.MaxParallelRequests +
+                   ", max_concurrency=" + settings.MaxConcurrency +
+                   ", request_timeout_ms=" + settings.RequestTimeoutMs + ").");
             }
             catch (EndpointInitializationException)
             {
@@ -66,7 +78,13 @@ namespace XUnity.AutoTranslator.LlmEndpoint
 
             while (!operation.IsComplete) yield return null;
 
-            if (operation.HasFailures) logger.Warn("One or more translations failed; returning the original text.");
+            // A soft failure here is already surfaced at batch level (Error) or as an
+            // unresolved-items Warn; keep this per-call note at Debug to avoid flooding
+            // one line per text during a backend outage.
+            if (operation.HasFailures && logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.Debug("Returning original text for a failed translation: " + operation.GetErrorSummary());
+            }
             string[] results = operation.GetResults(true);
             if (results.Length == 1) context.Complete(results[0]);
             else context.Complete(results);

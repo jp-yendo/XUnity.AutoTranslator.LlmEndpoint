@@ -17,7 +17,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
 
         public AnthropicBackend(LlmSettings settings, EndpointLogger logger) : base(settings, logger)
         {
-            transport = new HttpTransport(settings.MaxParallelRequests, ProductInfo.UserAgent);
+            transport = new HttpTransport(settings.MaxParallelRequests, settings.RequestTimeoutMs, ProductInfo.UserAgent);
             messagesEndpoint = ProviderEndpoint.AnthropicMessages(settings.EndpointUrl);
         }
 
@@ -65,7 +65,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
         {
             Dictionary<string, object> root = Object();
             root["model"] = Settings.Model;
-            root["max_tokens"] = Math.Max(1, prompt.MaxOutputTokens);
+            root["max_tokens"] = LlmSettings.AnthropicMaxOutputTokens;
             if (!StringUtil.IsBlank(prompt.SystemMessage)) root["system"] = prompt.SystemMessage;
 
             List<object> messages = new List<object>();

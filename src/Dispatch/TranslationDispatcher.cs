@@ -50,15 +50,31 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
             for (int i = 0; i < sourceTexts.Length; i++) originals[i] = sourceTexts[i] ?? string.Empty;
 
             PendingOperation operation = new PendingOperation(originals);
-            UntranslatedTextInfo[] infos = context.UntranslatedTextInfos;
             DateTime now = DateTime.UtcNow;
             string sourceLanguage = context.SourceLanguage;
             string targetLanguage = context.DestinationLanguage;
 
+            int queuedCount = 0;
+            int queueSize = 0;
+            List<string> passedThrough = null;
             lock (sync)
             {
                 for (int i = 0; i < originals.Length; i++)
                 {
+                    // Text that needs no translation (numbers, timers, FPS, versions,
+                    // single Latin letters, ...) is completed with its original value and
+                    // never enters the queue or reaches the backend.
+                    if (PassthroughFilter.ShouldPassthrough(originals[i]))
+                    {
+                        operation.CompleteItem(i, originals[i]);
+                        if (logger.IsEnabled(LogLevel.Debug))
+                        {
+                            if (passedThrough == null) passedThrough = new List<string>();
+                            passedThrough.Add(originals[i]);
+                        }
+                        continue;
+                    }
+
                     PendingItem item = new PendingItem();
                     item.Operation = operation;
                     item.Index = i;
@@ -67,14 +83,22 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
                     item.SourceLanguage = sourceLanguage;
                     item.TargetLanguage = targetLanguage;
                     item.EnqueuedUtc = now;
-                    if (infos != null && i < infos.Length && infos[i] != null)
-                    {
-                        item.ContextBefore = CopyContextBefore(infos[i].ContextBefore);
-                        item.ContextAfter = CopyContextAfter(infos[i].ContextAfter);
-                    }
                     queue.Add(item);
+                    queuedCount++;
                 }
-                Monitor.PulseAll(sync);
+                queueSize = queue.Count;
+                if (queuedCount > 0) Monitor.PulseAll(sync);
+            }
+            if (passedThrough != null)
+            {
+                for (int i = 0; i < passedThrough.Count; i++)
+                {
+                    logger.Debug("Passthrough item (source=" + passedThrough[i] + ").");
+                }
+            }
+            if (queuedCount > 0 && logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.Debug("Queued " + queuedCount + " item(s) (queue_size=" + queueSize + ").");
             }
             return operation;
         }
@@ -94,6 +118,13 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
                         {
                             ProcessBatch(batch);
                         }
+                        catch (ThreadAbortException)
+                        {
+                            // Host shutdown aborts the worker thread. Record it as a normal
+                            // stop and let the abort terminate the thread.
+                            logger.Debug("Batch processing stopped due to host shutdown.");
+                            throw;
+                        }
                         catch (Exception ex)
                         {
                             logger.Error("Unexpected batch processing failure.", ex);
@@ -105,6 +136,13 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
                         }
                     });
                 }
+                catch (ThreadAbortException)
+                {
+                    // Host shutdown aborts the dispatcher thread. Record it as a normal
+                    // stop and let the abort terminate the thread.
+                    logger.Debug("Dispatcher thread stopped due to host shutdown.");
+                    throw;
+                }
                 catch (Exception ex)
                 {
                     logger.Error("The dispatcher loop recovered from an error.", ex);
@@ -115,6 +153,8 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
 
         private List<PendingItem> WaitForBatch()
         {
+            List<PendingItem> batch;
+            int queueSize;
             lock (sync)
             {
                 while (queue.Count == 0) Monitor.Wait(sync);
@@ -128,8 +168,14 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
                         Monitor.Wait(sync, waitMs);
                     }
                 }
-                return TakeCompatibleBatch();
+                batch = TakeCompatibleBatch();
+                queueSize = queue.Count;
             }
+            if (batch.Count > 0 && logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.Debug("Dequeued " + batch.Count + " item(s) for a batch (queue_size=" + queueSize + ").");
+            }
+            return batch;
         }
 
         private List<PendingItem> TakeCompatibleBatch()
@@ -173,29 +219,15 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
             return PromptBudgetEstimator.EstimateUpperBoundTokens(prompt, promptItems);
         }
 
+        private int CurrentQueueSize()
+        {
+            lock (sync) return queue.Count;
+        }
+
         private static int GetTextCharacterCount(List<PendingItem> items)
         {
             int count = 0;
             for (int i = 0; i < items.Count; i++) count += items[i].Source.Length;
-            return count;
-        }
-
-        private static int GetContextCharacterCount(List<PendingItem> items)
-        {
-            int count = 0;
-            for (int i = 0; i < items.Count; i++)
-            {
-                count += GetCharacterCount(items[i].ContextBefore);
-                count += GetCharacterCount(items[i].ContextAfter);
-            }
-            return count;
-        }
-
-        private static int GetCharacterCount(List<string> values)
-        {
-            int count = 0;
-            if (values == null) return count;
-            for (int i = 0; i < values.Count; i++) count += values[i] == null ? 0 : values[i].Length;
             return count;
         }
 
@@ -207,6 +239,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
         private void ProcessWithRecovery(List<PendingItem> items)
         {
             List<PendingItem> unresolved = new List<PendingItem>(items);
+            bool logItems = settings.LogTranslationItems && logger.IsEnabled(LogLevel.Info);
             for (int attempt = 0; attempt < profile.FormatAttemptCount && unresolved.Count > 0; attempt++)
             {
                 List<PromptItem> promptItems = BuildPromptItems(unresolved);
@@ -216,21 +249,27 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
                 try
                 {
                     PromptEnvelope prompt = profile.BuildPrompt(promptItems, promptContext, attempt);
-                    prompt.MaxOutputTokens = PromptBudgetEstimator.EstimateOutputUpperBoundTokens(promptItems);
                     int textCharacters = GetTextCharacterCount(unresolved);
-                    int contextCharacters = GetContextCharacterCount(unresolved);
                     int estimatedTokens = PromptBudgetEstimator.EstimateUpperBoundTokens(prompt, promptItems);
                     logger.BatchActivity(
                        settings.LogBatchActivity,
                        "Batch request started (request_id=" + requestId +
-                       ", backend=" + settings.Backend +
-                       ", profile=" + profile.Id +
                        ", items=" + unresolved.Count +
                        ", text_characters=" + textCharacters +
-                       ", context_characters=" + contextCharacters +
                        ", estimated_tokens=" + estimatedTokens +
-                       ", max_request_tokens=" + settings.MaxRequestTokens +
+                       // The batch items were already removed from the queue, so add them
+                       // back in to report the total still pending including this request.
+                       ", queue_size=" + (CurrentQueueSize() + unresolved.Count) +
                        ", format_attempt=" + (attempt + 1) + ").");
+                    if (logItems)
+                    {
+                        for (int i = 0; i < unresolved.Count; i++)
+                        {
+                            logger.Info("Request item (request_id=" + requestId +
+                               ", id=" + unresolved[i].Id +
+                               ", source=" + unresolved[i].Source + ").");
+                        }
+                    }
                     stopwatch = Stopwatch.StartNew();
                     string output = backend.Generate(prompt);
                     stopwatch.Stop();
@@ -239,7 +278,8 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
                        "Batch response received (request_id=" + requestId +
                        ", items=" + unresolved.Count +
                        ", response_characters=" + output.Length +
-                       ", elapsed=" + DurationFormatter.Format(stopwatch.Elapsed) + ").");
+                       ", elapsed=" + DurationFormatter.Format(stopwatch.Elapsed) +
+                       ", queue_size=" + CurrentQueueSize() + ").");
                     ProfileParseResult parsed = profile.ParseResponse(output, promptItems, attempt);
                     List<PendingItem> next = new List<PendingItem>();
                     for (int i = 0; i < unresolved.Count; i++)
@@ -249,7 +289,12 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
                         if (parsed.Translations.TryGetValue(item.Id, out translated) && !StringUtil.IsBlank(translated))
                         {
                             item.Operation.CompleteItem(item.Index, translated);
-                            logger.Debug("Translation item completed (" + item.Id + ").");
+                            if (logItems)
+                            {
+                                logger.Info("Result item (request_id=" + requestId +
+                                   ", id=" + item.Id +
+                                   ", translation=" + translated + ").");
+                            }
                         }
                         else
                         {
@@ -259,7 +304,12 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
                     unresolved = next;
                     if (unresolved.Count > 0 && !parsed.IsFormatValid)
                     {
-                        logger.Warn("The model response was incomplete or malformed; unresolved items will be retried.");
+                        // Intermediate, recoverable state (a later attempt or a split may
+                        // still resolve these), so keep it at Debug; the terminal give-up
+                        // below reports at Warn.
+                        logger.Debug("Model response was incomplete or malformed (request_id=" + requestId +
+                           ", unresolved=" + unresolved.Count +
+                           ", format_attempt=" + (attempt + 1) + ").");
                     }
                 }
                 catch (BackendException ex)
@@ -282,6 +332,10 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
                 ProcessWithRecovery(unresolved.GetRange(middle, unresolved.Count - middle));
                 return;
             }
+            // Terminal give-up: format recovery and splitting are exhausted. These items
+            // fall back to their original text, so report it once at Warn.
+            logger.Warn("Giving up on " + unresolved.Count +
+               " item(s) that could not be matched to a model response; returning original text.");
             FailItems(unresolved, "The model response could not be matched to the requested translation.");
         }
 
@@ -303,8 +357,6 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
                 PromptItem promptItem = new PromptItem();
                 promptItem.Id = items[i].Id;
                 promptItem.Text = items[i].Source;
-                promptItem.ContextBefore = items[i].ContextBefore;
-                promptItem.ContextAfter = items[i].ContextAfter;
                 result.Add(promptItem);
             }
             return result;
@@ -313,24 +365,6 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Dispatch
         private static void FailItems(List<PendingItem> items, string error)
         {
             for (int i = 0; i < items.Count; i++) items[i].Operation.FailItem(items[i].Index, error);
-        }
-
-        private static List<string> CopyContextBefore(List<string> source)
-        {
-            List<string> result = new List<string>();
-            if (source == null) return result;
-            int start = Math.Max(0, source.Count - LlmSettings.MaxContextItems);
-            for (int i = start; i < source.Count; i++) result.Add(source[i] ?? string.Empty);
-            return result;
-        }
-
-        private static List<string> CopyContextAfter(List<string> source)
-        {
-            List<string> result = new List<string>();
-            if (source == null) return result;
-            int count = Math.Min(source.Count, LlmSettings.MaxContextItems);
-            for (int i = 0; i < count; i++) result.Add(source[i] ?? string.Empty);
-            return result;
         }
     }
 }

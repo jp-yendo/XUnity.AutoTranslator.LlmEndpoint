@@ -17,7 +17,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
 
         public OpenAiBackend(LlmSettings settings, EndpointLogger logger) : base(settings, logger)
         {
-            transport = new HttpTransport(settings.MaxParallelRequests, ProductInfo.UserAgent);
+            transport = new HttpTransport(settings.MaxParallelRequests, settings.RequestTimeoutMs, ProductInfo.UserAgent);
             chatCompletionsEndpoint = ProviderEndpoint.OpenAiChatCompletions(settings.EndpointUrl);
         }
 

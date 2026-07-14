@@ -31,7 +31,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
                 {
                     if (!ex.IsTransient || attempt >= Settings.RetryCount) throw;
                     lastError = ex;
-                    WaitBeforeRetry(attempt, ex.RetryAfterMs);
+                    WaitBeforeRetry(attempt, ex);
                 }
             }
             throw lastError ?? new BackendException("The backend request failed.", false, 0);
@@ -45,7 +45,7 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
                statusCode == 429 || statusCode == 529 || statusCode >= 500;
         }
 
-        private void WaitBeforeRetry(int attempt, int retryAfterMs)
+        private void WaitBeforeRetry(int attempt, BackendException ex)
         {
             int exponential = LlmSettings.RetryBaseDelayMs;
             for (int i = 0; i < attempt && exponential < LlmSettings.RetryMaximumDelayMs; i++)
@@ -54,8 +54,9 @@ namespace XUnity.AutoTranslator.LlmEndpoint.Backends
             }
             int jitter;
             lock (RandomLock) jitter = Random.Next(0, Math.Max(1, LlmSettings.RetryBaseDelayMs / 2 + 1));
-            int delay = Math.Max(retryAfterMs, exponential + jitter);
-            Logger.Debug("Retrying an LLM request after " + delay + " ms.");
+            int delay = Math.Max(ex.RetryAfterMs, exponential + jitter);
+            Logger.Debug("Transient backend failure on attempt " + (attempt + 1) + " of " + (Settings.RetryCount + 1) +
+               "; retrying after " + delay + " ms. Reason: " + ex.Message);
             if (delay > 0) Thread.Sleep(delay);
         }
     }
