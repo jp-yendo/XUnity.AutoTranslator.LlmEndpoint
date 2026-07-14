@@ -25,6 +25,7 @@
     <None Include="examples\Config.Anthropic.ini" />
     <None Include="examples\Config.Ollama.ini" />
     <None Include="examples\Config.OpenAI.ini" />
+    <None Include="LICENSE" />
     <None Include="README-ja.md" />
     <None Include="README.md" />
     <None Include="THIRD_PARTY_NOTICES.md" />
